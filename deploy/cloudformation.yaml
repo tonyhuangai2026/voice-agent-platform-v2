@@ -1,0 +1,421 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GenAIIC Voice Bot Demo - EC2 + CloudFront (HTTPS via *.cloudfront.net)
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: S3 bucket where the code tarball lives (created by deploy.sh).
+  CodeKey:
+    Type: String
+    Description: S3 key for the code tarball (created by deploy.sh).
+  MinimaxApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional MiniMax API key. Leave blank to use only AWS Polly TTS.
+  SitePassword:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional Basic Auth password gating the whole site. Leave blank to disable auth.
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional Basic Auth password for /admin/ and /api/admin/* (runtime config UI). Empty = admin disabled (returns 503).
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues: [t3.small, t3.medium, t3.large, m5.large]
+    Description: EC2 instance type. t3.medium recommended (Silero VAD uses ~1GB RAM).
+  LatestUbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Description: Ubuntu 24.04 LTS (ships Python 3.12 natively, required for Nova Sonic).
+  UseElasticIp:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: If true, allocate an EIP and associate it with the instance so the public IP survives instance replacement. Recommended for prod (Chime VC origination routes are hard-coded to an IP).
+
+Conditions:
+  HasMinimaxKey: !Not [!Equals [!Ref MinimaxApiKey, '']]
+  UseEip: !Equals [!Ref UseElasticIp, 'true']
+
+Resources:
+  # --- Secrets --------------------------------------------------------------
+
+  MinimaxSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasMinimaxKey
+    Properties:
+      Name: !Sub '${AWS::StackName}-minimax'
+      SecretString: !Ref MinimaxApiKey
+
+  # --- IAM ------------------------------------------------------------------
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: voicebot-runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:InvokeModelWithBidirectionalStream
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - transcribe:StartStreamTranscription
+                  - transcribe:StartStreamTranscriptionWebSocket
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - polly:SynthesizeSpeech
+                Resource: '*'
+              - !If
+                - HasMinimaxKey
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref MinimaxSecret
+                - !Ref AWS::NoValue
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${CodeBucket}/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                Resource:
+                  - !GetAtt HistoryTable.Arn
+                  - !Sub '${HistoryTable.Arn}/index/*'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # --- DynamoDB -------------------------------------------------------------
+
+  HistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-call-history'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: call_id
+          AttributeType: S
+        - AttributeName: caller
+          AttributeType: S
+        - AttributeName: started_at
+          AttributeType: N
+      KeySchema:
+        - AttributeName: call_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: caller-started-index
+          KeySchema:
+            - AttributeName: caller
+              KeyType: HASH
+            - AttributeName: started_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # --- Network --------------------------------------------------------------
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: VoiceBot CloudFront origin to EC2 7860
+      SecurityGroupIngress:
+        # CloudFront → EC2:7860 (web UI + WebSocket)
+        - IpProtocol: tcp
+          FromPort: 7860
+          ToPort: 7860
+          SourcePrefixListId: pl-3b927c52  # com.amazonaws.global.cloudfront.origin-facing (us-east-1)
+        # Chime SDK Voice Connector → SIP signalling (UDP 5060) and RTP media
+        # (UDP 10000-10999). CIDRs sourced from AWS ip-ranges.json filtered by
+        # service=CHIME_VOICECONNECTOR & region=us-east-1. No managed prefix
+        # list is published for this service, so the CIDRs are inlined.
+        - IpProtocol: udp
+          FromPort: 5060
+          ToPort: 5060
+          CidrIp: 99.77.254.0/24
+          Description: SIP signalling Chime VC us-east-1 (block 1)
+        - IpProtocol: udp
+          FromPort: 5060
+          ToPort: 5060
+          CidrIp: 3.80.16.0/23
+          Description: SIP signalling Chime VC us-east-1 (block 2)
+        - IpProtocol: udp
+          FromPort: 10000
+          ToPort: 10999
+          CidrIp: 99.77.254.0/24
+          Description: RTP media Chime VC us-east-1 (block 1)
+        - IpProtocol: udp
+          FromPort: 10000
+          ToPort: 10999
+          CidrIp: 3.80.16.0/23
+          Description: RTP media Chime VC us-east-1 (block 2)
+
+  # --- EC2 ------------------------------------------------------------------
+
+  Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestUbuntuAmi
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds: [!Ref SecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ec2'
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -e
+            exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y python3.12 python3.12-venv python3-pip git curl unzip ffmpeg
+
+            # Node.js 20 (for voice-server)
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+
+            # AWS CLI v2
+            curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip
+            unzip -q /tmp/awscli.zip -d /tmp
+            /tmp/aws/install
+
+            # cfn-signal (needs python-pip-based package)
+            apt-get install -y python3-pip
+            pip3 install --break-system-packages https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz || true
+
+            mkdir -p /opt/voicebot
+            aws s3 cp "s3://${CodeBucket}/${CodeKey}" /tmp/code.tar.gz --region ${AWS::Region}
+            tar -xzf /tmp/code.tar.gz -C /opt/voicebot
+
+            cd /opt/voicebot
+            python3.12 -m venv .venv
+            .venv/bin/pip install --upgrade pip wheel
+            .venv/bin/pip install \
+              'pipecat-ai[aws,aws-nova-sonic,silero,websocket]' \
+              boto3 aioboto3 aiohttp python-dotenv fastapi uvicorn \
+              'ruamel.yaml>=0.18,<0.19' PyYAML 'mcp>=1.0' \
+              'bcrypt>=4' 'PyJWT>=2'
+
+            # Fetch MiniMax key if we stored one
+            MINIMAX_KEY=""
+            if [ -n "${MinimaxSecretArn}" ]; then
+              MINIMAX_KEY=$(aws secretsmanager get-secret-value --secret-id "${MinimaxSecretArn}" \
+                --query SecretString --output text --region ${AWS::Region} 2>/dev/null || echo '')
+            fi
+
+            # Determine the EC2 public IPv4 (used as PUBLIC_IP for SDP).
+            TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+            EC2_PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 || echo "0.0.0.0")
+
+            cat > /opt/voicebot/.env <<EOF
+            AWS_REGION=${AWS::Region}
+            MINIMAX_API_KEY=$MINIMAX_KEY
+            MINIMAX_BASE_URL=https://api.minimax.chat/v1/t2a_v2
+            MINIMAX_MODEL=speech-2.8-turbo
+            SITE_PASSWORD=${SitePassword}
+            ADMIN_PASSWORD=${AdminPassword}
+
+            # Inbound phone defaults (apply to every call from Chime Voice Connector).
+            # Routes every PSTN call to Nova Sonic v2 (English) with the
+            # Hikvision Tech Support KB scenario.
+            PHONE_ENGINE=nova-sonic
+            PHONE_LANG=en-US
+            PHONE_SCENARIO=hikvision-support
+            PHONE_VOICE=tiffany
+            # Pipeline-mode fallbacks (only used if PHONE_ENGINE=pipeline)
+            PHONE_PROVIDER=minimax
+            PHONE_MODEL=nova-2-lite
+            PHONE_MINIMAX_MODEL=speech-2.8-turbo
+
+            # voice-server (Node SIP bridge)
+            PUBLIC_IP=$EC2_PUBLIC_IP
+            RTP_PORT_BASE=10000
+            RTP_PORT_COUNT=1000
+            PIPECAT_WS_URL=ws://127.0.0.1:7860/phone/ws
+
+            # Call history persistence (DynamoDB)
+            HISTORY_TABLE=${HistoryTable}
+            HISTORY_TTL_DAYS=30
+
+            # LLM hangup / transfer-to-human tools (phone-leg only)
+            PHONE_TOOLS_ENABLED=1
+            EOF
+
+            # Build voice-server (TypeScript). Skips gracefully if dir missing.
+            if [ -d /opt/voicebot/voice-server ]; then
+              cd /opt/voicebot/voice-server
+              npm install --production=false
+              npx tsc
+              cd /opt/voicebot
+            fi
+
+            chown -R ubuntu:ubuntu /opt/voicebot
+
+            cat > /etc/systemd/system/voicebot.service <<'SERVICE'
+            [Unit]
+            Description=GenAIIC Voice Bot
+            After=network.target
+
+            [Service]
+            User=ubuntu
+            WorkingDirectory=/opt/voicebot
+            ExecStart=/opt/voicebot/.venv/bin/python bot.py --host 0.0.0.0 --port 7860
+            Restart=always
+            RestartSec=5
+            EnvironmentFile=/opt/voicebot/.env
+            StandardOutput=append:/var/log/voicebot.log
+            StandardError=append:/var/log/voicebot.log
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
+
+            cat > /etc/systemd/system/voiceserver.service <<'SERVICE'
+            [Unit]
+            Description=GenAIIC Voice Server (SIP/RTP -> Pipecat bridge)
+            After=network.target voicebot.service
+
+            [Service]
+            User=ubuntu
+            WorkingDirectory=/opt/voicebot/voice-server
+            ExecStart=/usr/bin/node dist/server.js
+            Restart=always
+            RestartSec=5
+            EnvironmentFile=/opt/voicebot/.env
+            StandardOutput=append:/var/log/voiceserver.log
+            StandardError=append:/var/log/voiceserver.log
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
+
+            systemctl daemon-reload
+            systemctl enable --now voicebot
+            if [ -d /opt/voicebot/voice-server/dist ]; then
+              systemctl enable --now voiceserver
+            fi
+
+            /usr/local/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource Instance --region ${AWS::Region} || true
+          - MinimaxSecretArn: !If [HasMinimaxKey, !Ref MinimaxSecret, '']
+
+  # --- Elastic IP (optional) ------------------------------------------------
+  # When UseElasticIp=true, allocate an EIP and bind it to the instance so the
+  # public IP survives stop/start and instance replacement. Required for prod
+  # because Chime VC origination routes are hard-coded to a specific IP.
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Condition: UseEip
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-eip'
+
+  ElasticIpAssoc:
+    Type: AWS::EC2::EIPAssociation
+    Condition: UseEip
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      InstanceId: !Ref Instance
+
+  # --- CloudFront -----------------------------------------------------------
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub '${AWS::StackName} voice bot'
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: EC2Origin
+            # When UseElasticIp=true, use the EIP-derived public DNS so the
+            # origin stays valid across instance replacement. Otherwise fall
+            # back to the auto-assigned Instance.PublicDnsName.
+            # EIP public DNS form is ec2-<ip-with-dashes>.compute-1.amazonaws.com.
+            DomainName: !If
+              - UseEip
+              - !Sub
+                - 'ec2-${DashedIp}.compute-1.amazonaws.com'
+                - DashedIp: !Join ['-', !Split ['.', !Ref ElasticIp]]
+              - !GetAtt Instance.PublicDnsName
+            CustomOriginConfig:
+              HTTPPort: 7860
+              OriginProtocolPolicy: http-only
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: EC2Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # CachingDisabled — audio + WS must never cache
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # AllViewerExceptHostHeader — forwards everything but rewrites Host
+          # so origin validation works.
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1.2_2021
+
+Outputs:
+  URL:
+    Description: Open this in your browser.
+    Value: !Sub 'https://${Distribution.DomainName}/'
+  CloudFrontDomain:
+    Value: !GetAtt Distribution.DomainName
+  InstanceId:
+    Value: !Ref Instance
+  PublicDnsName:
+    Value: !GetAtt Instance.PublicDnsName
+  PublicIP:
+    Description: Stable EIP if UseElasticIp=true, else the auto-assigned instance IP.
+    Value: !If [UseEip, !Ref ElasticIp, !GetAtt Instance.PublicIp]
+  SSHCommand:
+    Description: SSM Session Manager command (no SSH key needed).
+    Value: !Sub 'aws ssm start-session --target ${Instance} --region ${AWS::Region}'
