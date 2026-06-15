@@ -95,6 +95,14 @@ Resources:
                   - bedrock:InvokeModelWithResponseStream
                   - bedrock:InvokeModelWithBidirectionalStream
                 Resource: '*'
+              # Invoke MCP servers hosted on Bedrock AgentCore (SigV4-signed,
+              # see mcp_sigv4.py). Resource '*' because the runtime ARN is the
+              # operator's own and not known at template synth time; scoped to
+              # the single invoke action (NOT AgentCore management/full access).
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeAgentRuntime
+                Resource: '*'
               - Effect: Allow
                 Action:
                   - transcribe:StartStreamTranscription
