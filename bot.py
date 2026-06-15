@@ -1239,7 +1239,10 @@ _history: HistoryRecorder | None = (
     if HISTORY_DISABLED
     else HistoryRecorder(
         table_name=HISTORY_TABLE,
-        region=os.environ.get("AWS_REGION", "us-east-1"),
+        # DynamoDB lives in the DEPLOY region, which can differ from AWS_REGION
+        # (the Bedrock region). DDB_REGION falls back to AWS_REGION, so a
+        # single-region deploy (the common case) is unchanged.
+        region=os.environ.get("DDB_REGION") or os.environ.get("AWS_REGION", "us-east-1"),
         ttl_days=HISTORY_TTL_DAYS,
     )
 )
@@ -4833,7 +4836,7 @@ async def list_history_by_caller(
 
         # BatchGetItem returns up to 100 items per request — limit ≤ 200 so
         # in the worst case we make two batches.
-        ddb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        ddb = boto3.resource("dynamodb", region_name=os.environ.get("DDB_REGION") or os.environ.get("AWS_REGION", "us-east-1"))
 
         def _batch_get(batch_keys: list[dict]) -> list[dict]:
             req = {table.name: {"Keys": batch_keys}}

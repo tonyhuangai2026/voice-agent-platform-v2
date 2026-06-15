@@ -14,6 +14,15 @@ set -euo pipefail
 STACK_NAME=${STACK_NAME:-genaiic-voicebot}
 REGION=${REGION:-us-east-1}
 INSTANCE_TYPE=${INSTANCE_TYPE:-t3.medium}
+# Bedrock/Transcribe/Polly region (the bot's AWS_REGION). Can differ from the
+# deploy REGION — e.g. run EC2 in eu-central-1 but keep Bedrock on us-east-1
+# (us.* inference-profile model IDs). Defaults to us-east-1.
+BEDROCK_REGION=${BEDROCK_REGION:-us-east-1}
+# CloudFront origin-facing managed prefix list id FOR THE DEPLOY REGION.
+# us-east-1=pl-3b927c52, eu-central-1=pl-a3a144ca. Look up others with:
+#   aws ec2 describe-managed-prefix-lists --region <r> \
+#     --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing
+CF_PREFIX_LIST_ID=${CF_PREFIX_LIST_ID:-pl-3b927c52}
 
 cd "$(dirname "$0")"
 PROJECT_ROOT="$(cd .. && pwd)"
@@ -112,6 +121,8 @@ aws cloudformation deploy \
     "SitePassword=${SITE_PASSWORD:-}" \
     "AdminPassword=${ADMIN_PASSWORD:-}" \
     "InstanceType=$INSTANCE_TYPE" \
+    "BedrockRegion=$BEDROCK_REGION" \
+    "CloudFrontPrefixListId=$CF_PREFIX_LIST_ID" \
   --no-fail-on-empty-changeset
 
 echo

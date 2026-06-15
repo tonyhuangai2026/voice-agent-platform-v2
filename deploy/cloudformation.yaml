@@ -37,6 +37,24 @@ Parameters:
     Default: 'false'
     AllowedValues: ['true', 'false']
     Description: If true, allocate an EIP and associate it with the instance so the public IP survives instance replacement. Recommended for prod (Chime VC origination routes are hard-coded to an IP).
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+    Description: >-
+      Region used for Bedrock / Transcribe / Polly calls (the AWS_REGION the bot
+      uses). Independent of the deploy region so you can run the EC2 in, e.g.,
+      eu-central-1 while keeping Bedrock model IDs (us.* inference profiles) on
+      us-east-1. Leave at us-east-1 unless you have eu.* model access.
+  CloudFrontPrefixListId:
+    Type: String
+    Default: pl-3b927c52
+    Description: >-
+      Managed prefix list for CloudFront's origin-facing IPs IN THE DEPLOY
+      REGION. Default pl-3b927c52 is us-east-1's
+      com.amazonaws.global.cloudfront.origin-facing. For another region, look up
+      that region's id (EC2 console > Managed prefix lists, filter
+      "cloudfront.origin-facing") and pass it in — e.g. eu-central-1 uses a
+      different id. A wrong-region id makes the SecurityGroup fail to create.
 
 Conditions:
   HasMinimaxKey: !Not [!Equals [!Ref MinimaxApiKey, '']]
@@ -153,7 +171,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 7860
           ToPort: 7860
-          SourcePrefixListId: pl-3b927c52  # com.amazonaws.global.cloudfront.origin-facing (us-east-1)
+          SourcePrefixListId: !Ref CloudFrontPrefixListId  # CloudFront origin-facing prefix list for the DEPLOY region (see param)
         # Chime SDK Voice Connector → SIP signalling (UDP 5060) and RTP media
         # (UDP 10000-10999). CIDRs sourced from AWS ip-ranges.json filtered by
         # service=CHIME_VOICECONNECTOR & region=us-east-1. No managed prefix
@@ -249,7 +267,8 @@ Resources:
             EC2_PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 || echo "0.0.0.0")
 
             cat > /opt/voicebot/.env <<EOF
-            AWS_REGION=${AWS::Region}
+            AWS_REGION=${BedrockRegion}
+            DDB_REGION=${AWS::Region}
             MINIMAX_API_KEY=$MINIMAX_KEY
             MINIMAX_BASE_URL=https://api.minimax.chat/v1/t2a_v2
             MINIMAX_MODEL=speech-2.8-turbo

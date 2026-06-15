@@ -112,7 +112,9 @@ class UserStore:
 
     def __init__(self, table_name: str | None = None, region: str | None = None):
         self._table_name = (table_name or USERS_TABLE)
-        self._region = region or os.environ.get("AWS_REGION", "us-east-1")
+        # DynamoDB lives in the deploy region; DDB_REGION falls back to
+        # AWS_REGION so single-region deploys are unchanged.
+        self._region = region or os.environ.get("DDB_REGION") or os.environ.get("AWS_REGION", "us-east-1")
         self._table = None
 
     def _get_table(self):
