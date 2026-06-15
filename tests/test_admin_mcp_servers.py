@@ -122,6 +122,37 @@ def test_post_then_get_masks_headers():
     assert bot.MCP_CONFIG.get("weather-api")["headers"]["Authorization"] == "Bearer real-secret"
 
 
+def test_post_sigv4_auth_survives_upsert():
+    """Regression: POST /api/admin/mcp-servers with auth=sigv4 must persist the
+    auth object. McpServerBody originally lacked an `auth` field, so Pydantic
+    silently dropped it — a SigV4 server saved as auth=none and 403'd at connect
+    (the exact gap a customer hits wiring their own AgentCore MCP via the UI)."""
+    from fastapi.testclient import TestClient
+    bot = _import_app()
+    client = TestClient(bot.app)
+
+    payload = _server_payload(
+        id="client-agentcore",
+        headers={},
+        auth={"type": "sigv4", "service": "bedrock-agentcore", "region": "eu-central-1"},
+    )
+    r = client.post("/api/admin/mcp-servers", headers=_basic(), json=payload)
+    assert r.status_code == 200, r.text
+    assert r.json()["server"]["auth"] == {
+        "type": "sigv4", "service": "bedrock-agentcore", "region": "eu-central-1",
+    }
+    # And it's actually persisted (not just echoed).
+    stored = bot.MCP_CONFIG.get("client-agentcore")
+    assert stored["auth"]["type"] == "sigv4"
+    assert stored["auth"]["region"] == "eu-central-1"
+
+    # Backward-compat: omitting auth normalizes to none.
+    r2 = client.post("/api/admin/mcp-servers", headers=_basic(),
+                     json=_server_payload(id="no-auth-srv", headers={}))
+    assert r2.status_code == 200, r2.text
+    assert bot.MCP_CONFIG.get("no-auth-srv")["auth"] == {"type": "none"}
+
+
 def test_post_mask_sentinel_preserves_stored_secret():
     from fastapi.testclient import TestClient
     bot = _import_app()

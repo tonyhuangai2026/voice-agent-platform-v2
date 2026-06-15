@@ -20,6 +20,7 @@ import time
 import xml.sax.saxutils as saxutils
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any
 
 import aiohttp
 import boto3
@@ -3908,6 +3909,11 @@ class McpServerBody(BaseModel):
     url: str
     headers: dict[str, str] | None = None
     enabled: bool = True
+    # auth object {type: none|header|sigv4, service?, region?}. Optional and
+    # validated/normalized by McpConfig.upsert -> validate_auth (missing = none).
+    # Without this field Pydantic would silently drop the SigV4 auth the admin
+    # UI sends, so a sigv4 server would save as auth=none and 403 at connect.
+    auth: dict[str, Any] | None = None
 
 
 def _demos_referencing_mcp_server(server_id: str) -> list[str]:
