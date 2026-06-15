@@ -98,13 +98,16 @@ def _import_bot_with_env(env: dict) -> object:
 
 
 def _login_admin(bot):
-    """Return an authed https TestClient (seeds + logs in 'admin').
+    """Return an authed https TestClient (creates + logs in 'admin').
 
-    Requires a USERS_TABLE created in the active moto mock. https base_url so
-    the Secure vb_session cookie round-trips."""
+    The ADMIN_PASSWORD first-boot seed has been removed, so the bootstrap admin
+    is created explicitly. Requires a USERS_TABLE created in the active moto
+    mock. https base_url so the Secure vb_session cookie round-trips."""
+    import asyncio
     from fastapi.testclient import TestClient
+    asyncio.run(bot.USER_STORE.create("admin", _ADMIN_PWD, role="admin"))
     client = TestClient(bot.app, base_url="https://testserver")
-    client.__enter__()  # runs startup seed (admin from ADMIN_PASSWORD)
+    client.__enter__()
     r = client.post("/api/auth/login", json={"username": "admin", "password": _ADMIN_PWD})
     assert r.status_code == 200, r.text
     return client

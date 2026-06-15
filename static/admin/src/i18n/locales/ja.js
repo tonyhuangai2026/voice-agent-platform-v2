@@ -68,6 +68,26 @@ export default {
     },
   },
 
+  setup: {
+    subtitle: '初回アクセス · 管理者を設定',
+    intro: 'このデプロイはまだ初期化されていません。続行するには最初の管理者アカウントを作成してください。作成後は自動的にログインします。',
+    username: 'ユーザー名',
+    usernamePlaceholder: '管理者のユーザー名を設定',
+    password: 'パスワード',
+    passwordPlaceholder: '管理者のパスワードを設定',
+    confirm: 'パスワードの確認',
+    confirmPlaceholder: 'パスワードを再入力',
+    submit: '管理者を作成',
+    errors: {
+      usernameRequired: 'ユーザー名を入力してください',
+      passwordRequired: 'パスワードを入力してください',
+      passwordsMismatch: 'パスワードが一致しません',
+      alreadyInitialized: 'このデプロイは既に初期化されています。ログインページへお進みください。',
+      invalidInput: 'ユーザー名とパスワードは必須です。',
+      generic: '作成に失敗しました：{msg}',
+    },
+  },
+
   dashboard: {
     title: 'ダッシュボード',
     subtitle: 'リアルタイム通話メトリクス · 7秒ごとに更新',

@@ -68,6 +68,26 @@ export default {
     },
   },
 
+  setup: {
+    subtitle: 'Première utilisation · Configurer l’administrateur',
+    intro: 'Ce déploiement n’a pas encore été initialisé. Créez le premier compte administrateur pour continuer ; vous serez connecté automatiquement.',
+    username: 'Nom d’utilisateur',
+    usernamePlaceholder: 'Choisissez un nom d’utilisateur administrateur',
+    password: 'Mot de passe',
+    passwordPlaceholder: 'Choisissez un mot de passe administrateur',
+    confirm: 'Confirmer le mot de passe',
+    confirmPlaceholder: 'Saisissez à nouveau le mot de passe',
+    submit: 'Créer l’administrateur',
+    errors: {
+      usernameRequired: 'Saisissez un nom d’utilisateur',
+      passwordRequired: 'Saisissez un mot de passe',
+      passwordsMismatch: 'Les deux mots de passe ne correspondent pas',
+      alreadyInitialized: 'Ce déploiement est déjà initialisé. Veuillez aller à la page de connexion.',
+      invalidInput: 'Le nom d’utilisateur et le mot de passe ne peuvent pas être vides.',
+      generic: 'Échec de la création : {msg}',
+    },
+  },
+
   dashboard: {
     title: 'Tableau de bord',
     subtitle: 'Métriques d’appels en direct · sondage 7 s',

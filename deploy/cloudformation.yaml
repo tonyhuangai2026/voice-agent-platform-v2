@@ -266,10 +266,19 @@ Resources:
             TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
             EC2_PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 || echo "0.0.0.0")
 
-            cat > /opt/voicebot/.env <<EOF
+            # NOTE: quoted heredoc (<<'EOF') so the instance shell performs NO
+            # dollar-sign or backtick expansion on the body. This keeps
+            # SitePassword / AdminPassword (substituted here as literals by CFN
+            # !Sub at template-upload time) byte-for-byte intact even when they
+            # contain a dollar sign, backticks, or spaces. CFN !Sub still
+            # resolves its own brace placeholders because it runs before the
+            # shell ever sees this text.
+            # Shell-runtime values (MINIMAX_KEY, EC2_PUBLIC_IP) are intentionally
+            # NOT in this block — they are appended via printf below so they get
+            # expanded by the shell without endangering the password lines.
+            cat > /opt/voicebot/.env <<'EOF'
             AWS_REGION=${BedrockRegion}
             DDB_REGION=${AWS::Region}
-            MINIMAX_API_KEY=$MINIMAX_KEY
             MINIMAX_BASE_URL=https://api.minimax.chat/v1/t2a_v2
             MINIMAX_MODEL=speech-2.8-turbo
             SITE_PASSWORD=${SitePassword}
@@ -288,7 +297,6 @@ Resources:
             PHONE_MINIMAX_MODEL=speech-2.8-turbo
 
             # voice-server (Node SIP bridge)
-            PUBLIC_IP=$EC2_PUBLIC_IP
             RTP_PORT_BASE=10000
             RTP_PORT_COUNT=1000
             PIPECAT_WS_URL=ws://127.0.0.1:7860/phone/ws
@@ -300,6 +308,11 @@ Resources:
             # LLM hangup / transfer-to-human tools (phone-leg only)
             PHONE_TOOLS_ENABLED=1
             EOF
+
+            # Shell-runtime values: appended AFTER the quoted heredoc so the
+            # shell expands them, while the password lines above stay verbatim.
+            printf '%s\n' "MINIMAX_API_KEY=$MINIMAX_KEY" >> /opt/voicebot/.env
+            printf '%s\n' "PUBLIC_IP=$EC2_PUBLIC_IP" >> /opt/voicebot/.env
 
             # Build voice-server (TypeScript). Skips gracefully if dir missing.
             if [ -d /opt/voicebot/voice-server ]; then

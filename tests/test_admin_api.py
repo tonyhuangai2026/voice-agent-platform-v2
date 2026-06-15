@@ -82,13 +82,16 @@ def _import_app():
 def _admin_client(bot):
     """Return a TestClient whose vb_session cookie is a logged-in admin.
 
-    The startup seed creates 'admin' from ADMIN_PASSWORD; we trigger startup
-    via the context manager, then log in so subsequent calls carry the cookie.
+    The ADMIN_PASSWORD first-boot seed has been removed, so the bootstrap admin
+    is created explicitly here (via the store), then we trigger startup via the
+    context manager and log in so subsequent calls carry the cookie.
     """
+    import asyncio
     from fastapi.testclient import TestClient
+    asyncio.run(bot.USER_STORE.create("admin", _ADMIN_PWD, role="admin"))
     # https base_url so the Secure vb_session cookie is stored + resent.
     client = TestClient(bot.app, base_url="https://testserver")
-    client.__enter__()  # runs @app.on_event("startup") → _seed_admin (stays open)
+    client.__enter__()
     r = client.post("/api/auth/login", json={"username": "admin", "password": _ADMIN_PWD})
     assert r.status_code == 200, r.text
     return client

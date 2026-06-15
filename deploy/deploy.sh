@@ -100,9 +100,14 @@ if [ -z "${SITE_PASSWORD:-}" ]; then
 fi
 export SITE_PASSWORD
 
+# NOTE: ADMIN_PASSWORD is no longer used to seed an admin account. The admin
+# account is created interactively via the first-run setup wizard (/setup) the
+# first time the site is opened. This prompt is kept for backward-compat only;
+# the value is passed to CFN as AdminPassword but is NOT used to create a user.
+# You can leave it blank. See deploy/README.md and docs/first-run-setup.md.
 if [ -z "${ADMIN_PASSWORD:-}" ]; then
   echo
-  read -rsp "Admin UI password (blank = admin disabled): " ADMIN_PASSWORD
+  read -rsp "Admin UI password (UNUSED — admin is set via the first-run /setup wizard; press Enter): " ADMIN_PASSWORD
   echo
 fi
 export ADMIN_PASSWORD

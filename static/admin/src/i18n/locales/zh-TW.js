@@ -72,6 +72,26 @@ export default {
     },
   },
 
+  setup: {
+    subtitle: '首次造訪 · 設定管理員',
+    intro: '此部署尚未初始化。請建立第一個管理員帳號以繼續；建立後將自動登入。',
+    username: '使用者名稱',
+    usernamePlaceholder: '請設定管理員使用者名稱',
+    password: '密碼',
+    passwordPlaceholder: '請設定管理員密碼',
+    confirm: '確認密碼',
+    confirmPlaceholder: '請再次輸入密碼',
+    submit: '建立管理員',
+    errors: {
+      usernameRequired: '請輸入使用者名稱',
+      passwordRequired: '請輸入密碼',
+      passwordsMismatch: '兩次輸入的密碼不一致',
+      alreadyInitialized: '此部署已初始化，請前往登入頁。',
+      invalidInput: '使用者名稱和密碼不能為空。',
+      generic: '建立失敗：{msg}',
+    },
+  },
+
   dashboard: {
     title: 'Dashboard',
     subtitle: '即時通話指標 · 7 秒輪詢',

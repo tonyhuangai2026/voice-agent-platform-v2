@@ -81,6 +81,26 @@ export default {
     },
   },
 
+  setup: {
+    subtitle: '首次访问 · 设置管理员',
+    intro: '该部署尚未初始化。请创建第一个管理员账号以继续；创建后将自动登录。',
+    username: '用户名',
+    usernamePlaceholder: '请设置管理员用户名',
+    password: '密码',
+    passwordPlaceholder: '请设置管理员密码',
+    confirm: '确认密码',
+    confirmPlaceholder: '请再次输入密码',
+    submit: '创建管理员',
+    errors: {
+      usernameRequired: '请输入用户名',
+      passwordRequired: '请输入密码',
+      passwordsMismatch: '两次输入的密码不一致',
+      alreadyInitialized: '该部署已初始化，请前往登录页。',
+      invalidInput: '用户名和密码不能为空。',
+      generic: '创建失败：{msg}',
+    },
+  },
+
   dashboard: {
     title: 'Dashboard',
     subtitle: '实时通话指标 · 7s 轮询',

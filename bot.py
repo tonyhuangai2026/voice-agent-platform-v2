@@ -2391,6 +2391,7 @@ MCP_CONFIG = McpConfig(
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
 
 # --- User store + role-based auth dependencies --------------------------
+from botocore.exceptions import ClientError
 from user_store import UserStore, AuthUnavailable
 
 USER_STORE = UserStore()
@@ -2431,31 +2432,23 @@ def _set_session_cookie(response: Response, token: str) -> None:
     )
 
 
+async def _needs_setup() -> bool:
+    """True when the user table holds no accounts (fresh deploy → first-run
+    setup wizard). A missing table degrades to [] in USER_STORE.list(), so
+    that also reports needs_setup=True."""
+    return len(await USER_STORE.list()) == 0
+
+
 async def _seed_admin() -> None:
-    """First-boot seed: if the user table is empty and ADMIN_PASSWORD is set,
-    create a bootstrap 'admin' account so a fresh deploy can log in."""
-    if not ADMIN_PASSWORD:
-        return
-    try:
-        existing = await USER_STORE.list()
-    except Exception as e:
-        logger.warning(f"user seed: list() failed, skipping seed: {e}")
-        return
-    if existing:
-        return
-    try:
-        await USER_STORE.create("admin", ADMIN_PASSWORD, role="admin")
-        logger.info("user seed: created bootstrap 'admin' account from ADMIN_PASSWORD")
-    except Exception as e:
-        logger.warning(f"user seed: failed to create admin: {e}")
+    """Deprecated no-op. The ADMIN_PASSWORD first-boot seed has been removed:
+    a CFN heredoc escaping bug corrupted special-character passwords before
+    bcrypt-hashing them, so seeded admins could not log in. First-run setup is
+    now handled interactively via POST /api/auth/setup. ADMIN_PASSWORD may
+    still be present in the environment but is no longer used to create a user."""
+    return None
 
 
-@app.on_event("startup")
-async def _on_startup_seed_admin() -> None:
-    await _seed_admin()
-
-
-# --- Auth API (public: login; cookie-authenticated: logout / me) ---------
+# --- Auth API (public: login / setup-status / setup; cookie-auth: logout / me) ---------
 
 @app.post("/api/auth/login")
 async def auth_login(payload: dict, response: Response) -> dict:
@@ -2471,6 +2464,61 @@ async def auth_login(payload: dict, response: Response) -> dict:
         raise HTTPException(status_code=503, detail=str(e))
     if user is None:
         raise HTTPException(status_code=401, detail="invalid credentials")
+    token = _issue_jwt(user)
+    _set_session_cookie(response, token)
+    return {"username": user["username"], "role": user["role"]}
+
+
+@app.get("/api/auth/setup-status")
+async def auth_setup_status() -> dict:
+    """PUBLIC (no auth dependency): report whether the deploy still needs
+    first-run setup. Returns ONLY the bool — never any username/count — so it
+    leaks nothing about existing accounts. On an initialized deploy this is
+    permanently false."""
+    return {"needs_setup": await _needs_setup()}
+
+
+@app.post("/api/auth/setup")
+async def auth_setup(payload: dict, response: Response) -> dict:
+    """PUBLIC, self-closing first-run bootstrap. Creates the first admin
+    account when (and only when) the user table is empty, then auto-logs the
+    caller in (same JWT + cookie pattern as /api/auth/login).
+
+    Self-closing: once any user exists this endpoint is permanently 409 and can
+    never reset or overwrite an existing account. It is the only public WRITE
+    endpoint, so the guard is doubled: the _needs_setup() pre-check plus the
+    conditional write inside USER_STORE.create — under a concurrent race only
+    one create wins; the loser's DynamoDB ConditionalCheckFailedException is
+    mapped to 409 (never 500)."""
+    if not await _needs_setup():
+        raise HTTPException(status_code=409, detail="already initialized")
+
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    # Validate non-empty up front so empty input → 400 cleanly, distinct from
+    # the "already exists" ValueError (→ 409) that create can raise.
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password are required")
+
+    try:
+        user = await USER_STORE.create(username, password, role="admin")
+    except AuthUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        # create raises ValueError("...must be a non-empty string") for empty
+        # input (already guarded above → 400) and ValueError("user ... already
+        # exists") for a duplicate, including the normalized concurrent-write
+        # collision. Any ValueError here means the table is no longer empty
+        # (lost the race) → 409, never 500.
+        raise HTTPException(status_code=409, detail="already initialized")
+    except ClientError as e:
+        # Defense-in-depth: even if create's normalization is ever removed, a
+        # raw ConditionalCheckFailedException from the concurrent loser must
+        # still surface as 409, never 500.
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=409, detail="already initialized")
+        raise
+
     token = _issue_jwt(user)
     _set_session_cookie(response, token)
     return {"username": user["username"], "role": user["role"]}

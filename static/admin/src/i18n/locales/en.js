@@ -70,6 +70,26 @@ export default {
     },
   },
 
+  setup: {
+    subtitle: 'First-run · Set up admin',
+    intro: 'This deployment has not been initialized yet. Create the first administrator account to continue; you will be signed in automatically.',
+    username: 'Username',
+    usernamePlaceholder: 'Choose an admin username',
+    password: 'Password',
+    passwordPlaceholder: 'Choose an admin password',
+    confirm: 'Confirm password',
+    confirmPlaceholder: 'Re-enter the password',
+    submit: 'Create admin',
+    errors: {
+      usernameRequired: 'Please enter a username',
+      passwordRequired: 'Please enter a password',
+      passwordsMismatch: 'The two passwords do not match',
+      alreadyInitialized: 'This deployment is already initialized. Please go to the login page.',
+      invalidInput: 'Username and password cannot be empty.',
+      generic: 'Setup failed: {msg}',
+    },
+  },
+
   dashboard: {
     title: 'Dashboard',
     subtitle: 'Live call metrics · 7s polling',

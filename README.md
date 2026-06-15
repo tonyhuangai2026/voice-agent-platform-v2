@@ -113,6 +113,24 @@ MINIMAX_API_KEY=sk-... SITE_PASSWORD=your-pwd ./deploy.sh
 
 栈名默认 `yinshi-voicebot`，Region 必须 `us-east-1`（Nova Sonic 可用区 + CloudFront 前缀列表 ID 写死）。
 
+### 首次设置管理员 / First-run admin setup
+
+首次部署后没有管理员账号，**不再使用 `ADMIN_PASSWORD`**（旧机制因 CFN heredoc
+转义 bug 会损坏含特殊字符的密码，已废弃）。打开 CloudFront 地址会**自动跳转到
+`/setup`** 设置向导：设置管理员用户名 + 密码 → 提交后**自动登录**进入后台。
+之后向导永久关闭（再访问 `/setup` 反跳，`POST /api/auth/setup` 恒返回 `409`）。
+`deploy.sh` 里的 “Admin UI password” 提示已无作用，可留空。
+
+> After the first deploy there is no admin account yet, and `ADMIN_PASSWORD` is
+> **no longer used** to seed one. Open the CloudFront URL → you are sent to
+> **`/setup`** → create the admin username + password → you are **logged in
+> automatically**. The wizard then closes permanently (`/setup` redirects away,
+> `POST /api/auth/setup` returns `409`). The `deploy.sh` "Admin UI password"
+> prompt is now a no-op; leave it blank.
+
+详见 / see [`docs/first-run-setup.md`](docs/first-run-setup.md)（含锁死后的恢复方法 /
+lockout recovery）。
+
 ## API 参考
 
 bot.py 暴露的端点：

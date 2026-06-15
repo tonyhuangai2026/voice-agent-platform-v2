@@ -68,11 +68,15 @@ def _import_bot():
 
 
 def _client(bot, *, seed_login: bool = True):
-    """Return an authed-as-admin https TestClient (after startup seed)."""
+    """Return an authed-as-admin https TestClient.
+
+    The ADMIN_PASSWORD first-boot seed has been removed, so the bootstrap admin
+    is created explicitly here (directly via the store) and then logged in."""
     from fastapi.testclient import TestClient
 
+    asyncio.run(bot.USER_STORE.create("admin", _ADMIN_PWD, role="admin"))
     client = TestClient(bot.app, base_url="https://testserver")
-    client.__enter__()  # runs the startup seed
+    client.__enter__()
     if seed_login:
         r = client.post("/api/auth/login", json={"username": "admin", "password": _ADMIN_PWD})
         assert r.status_code == 200, r.text
@@ -336,32 +340,14 @@ def test_user_management_api(auth_env):
 # First-boot seed
 # ---------------------------------------------------------------------------
 
-def test_seed_creates_admin_when_table_empty(auth_env):
+def test_seed_admin_is_noop_even_with_admin_password(auth_env):
+    """The ADMIN_PASSWORD first-boot seed has been removed (see test_setup.py).
+    _seed_admin() is now a no-op: even with ADMIN_PASSWORD set, calling it does
+    NOT create a user. The table stays empty."""
     with mock_aws():
         _create_users_table()
         bot = _import_bot()
-        # Manually invoke the seed (also runs on startup, but assert directly).
-        asyncio.run(bot._seed_admin())
-        users = asyncio.run(bot.USER_STORE.list())
-        assert [u["username"] for u in users] == ["admin"]
-        assert users[0]["role"] == "admin"
-        # idempotent: a second seed does not duplicate / overwrite
-        asyncio.run(bot._seed_admin())
-        assert len(asyncio.run(bot.USER_STORE.list())) == 1
-
-
-def test_seed_noop_without_admin_password(monkeypatch):
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("AWS_REGION", "us-east-1")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
-    monkeypatch.setenv("MINIMAX_API_KEY", "x")
-    monkeypatch.setenv("AUTH_SECRET", "unit-test-secret-key-32-bytes-long!!")
-    monkeypatch.setenv("USERS_TABLE", USERS_TABLE)
-    monkeypatch.setenv("ADMIN_PASSWORD", "")  # no seed password
-    with mock_aws():
-        _create_users_table()
-        bot = _import_bot()
+        assert bot.ADMIN_PASSWORD  # auth_env sets ADMIN_PASSWORD
         asyncio.run(bot._seed_admin())
         assert asyncio.run(bot.USER_STORE.list()) == []
 

@@ -212,7 +212,11 @@ def _create_users_table(region: str = "us-east-1") -> None:
 
 
 def _admin_client(bot):
+    # ADMIN_PASSWORD first-boot seed removed: create the bootstrap admin
+    # explicitly, then start the app and log in.
+    import asyncio
     from fastapi.testclient import TestClient
+    asyncio.run(bot.USER_STORE.create("admin", _ADMIN_PWD, role="admin"))
     client = TestClient(bot.app, base_url="https://testserver")
     client.__enter__()
     r = client.post("/api/auth/login", json={"username": "admin", "password": _ADMIN_PWD})

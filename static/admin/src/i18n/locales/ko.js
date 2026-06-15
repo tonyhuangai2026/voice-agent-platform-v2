@@ -68,6 +68,26 @@ export default {
     },
   },
 
+  setup: {
+    subtitle: '최초 실행 · 관리자 설정',
+    intro: '이 배포는 아직 초기화되지 않았습니다. 계속하려면 첫 관리자 계정을 생성하세요. 생성 후 자동으로 로그인됩니다.',
+    username: '사용자 이름',
+    usernamePlaceholder: '관리자 사용자 이름을 설정하세요',
+    password: '비밀번호',
+    passwordPlaceholder: '관리자 비밀번호를 설정하세요',
+    confirm: '비밀번호 확인',
+    confirmPlaceholder: '비밀번호를 다시 입력하세요',
+    submit: '관리자 생성',
+    errors: {
+      usernameRequired: '사용자 이름을 입력하세요',
+      passwordRequired: '비밀번호를 입력하세요',
+      passwordsMismatch: '두 비밀번호가 일치하지 않습니다',
+      alreadyInitialized: '이 배포는 이미 초기화되었습니다. 로그인 페이지로 이동하세요.',
+      invalidInput: '사용자 이름과 비밀번호는 비워 둘 수 없습니다.',
+      generic: '생성 실패: {msg}',
+    },
+  },
+
   dashboard: {
     title: '대시보드',
     subtitle: '실시간 통화 지표 · 7초 폴링',

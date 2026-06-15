@@ -9,6 +9,7 @@ const DemosView = () => import('../views/DemosView.vue');
 const McpServersView = () => import('../views/McpServersView.vue');
 const UsersView = () => import('../views/UsersView.vue');
 const LoginView = () => import('../views/LoginView.vue');
+const SetupView = () => import('../views/SetupView.vue');
 // Call views merged in from the old demo SPA (tech_design §3). MyHistoryView is
 // the per-user "my calls" view (GET /api/history) — distinct from the admin-only
 // full HistoryView above (GET /api/admin/history).
@@ -23,6 +24,7 @@ export const router = createRouter({
   history: createWebHashHistory('/'),
   routes: [
     { path: '/login', name: 'login', component: LoginView, meta: { public: true, title: 'Login' } },
+    { path: '/setup', name: 'setup', component: SetupView, meta: { public: true, title: 'Setup' } },
     { path: '/', redirect: '/dashboard' },
     { path: '/dashboard', name: 'dashboard', component: DashboardView, meta: { title: 'Dashboard' } },
     { path: '/history', name: 'history', component: HistoryView, meta: { title: '历史记录' } },
@@ -39,10 +41,33 @@ export const router = createRouter({
   ],
 });
 
-// Global auth guard (tech_design §2). Every non-public route checks the
-// session via GET /api/auth/me (cookie-based). Unauthenticated → /login.
-// Visiting /login while already authenticated bounces to the home page.
+// Global auth guard (tech_design §2 / §4). Every navigation first probes
+// GET /api/auth/setup-status to decide whether the deploy still needs
+// first-run admin setup, THEN falls through to the session check via
+// GET /api/auth/me (cookie-based). Unauthenticated → /login. Visiting /login
+// while already authenticated bounces to the home page.
 router.beforeEach(async (to) => {
+  // --- First-run setup gate (runs BEFORE the me() session check) ----------
+  // FAIL-SAFE: if the probe errors (network / 5xx) treat as needs_setup=false
+  // and fall through to the normal login flow — never trap the user on /setup.
+  // The backend is authoritative (the setup endpoint 409s once initialized),
+  // so failing open here cannot be abused to reset an existing account.
+  let needsSetup = false;
+  try {
+    const status = await api.setupStatus();
+    needsSetup = status?.needs_setup === true;
+  } catch (e) {
+    needsSetup = false;
+  }
+
+  if (needsSetup) {
+    // Uninitialized deploy: force everything (including /login) to /setup;
+    // only /setup itself is allowed through.
+    return to.name === 'setup' ? true : { name: 'setup' };
+  }
+
+  // Initialized deploy: /setup is meaningless — bounce visitors away. We still
+  // need the session state to choose the destination, so probe me() first.
   let authed = false;
   try {
     await api.me();
@@ -51,6 +76,10 @@ router.beforeEach(async (to) => {
     // Only a 401 means "not logged in"; treat other errors (network/5xx) as
     // unauthenticated too so the guard fails safe to the login page.
     authed = false;
+  }
+
+  if (to.name === 'setup') {
+    return authed ? { path: '/' } : { name: 'login' };
   }
 
   if (to.meta?.public) {

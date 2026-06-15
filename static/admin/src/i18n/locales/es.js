@@ -68,6 +68,26 @@ export default {
     },
   },
 
+  setup: {
+    subtitle: 'Primer uso · Configurar administrador',
+    intro: 'Esta implementación aún no se ha inicializado. Crea la primera cuenta de administrador para continuar; se iniciará sesión automáticamente.',
+    username: 'Usuario',
+    usernamePlaceholder: 'Elige un usuario administrador',
+    password: 'Contraseña',
+    passwordPlaceholder: 'Elige una contraseña de administrador',
+    confirm: 'Confirmar contraseña',
+    confirmPlaceholder: 'Vuelve a introducir la contraseña',
+    submit: 'Crear administrador',
+    errors: {
+      usernameRequired: 'Introduce un usuario',
+      passwordRequired: 'Introduce una contraseña',
+      passwordsMismatch: 'Las dos contraseñas no coinciden',
+      alreadyInitialized: 'Esta implementación ya está inicializada. Ve a la página de inicio de sesión.',
+      invalidInput: 'El usuario y la contraseña no pueden estar vacíos.',
+      generic: 'Error al crear: {msg}',
+    },
+  },
+
   dashboard: {
     title: 'Panel',
     subtitle: 'Métricas de llamadas en vivo · sondeo cada 7 s',

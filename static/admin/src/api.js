@@ -70,6 +70,14 @@ export const api = {
   login: (username, password) =>
     authRequest('/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => authRequest('/logout', { method: 'POST' }),
+  // First-run setup (tech_design §4). Both are PUBLIC and skip the global 401
+  // redirect (authRequest). setupStatus → { needs_setup: bool }; permanently
+  // false once any admin exists. setup creates the first admin AND auto-logs
+  // in (sets the vb_session cookie server-side) → { username, role }; 409 when
+  // already initialized, 400 on empty input.
+  setupStatus: () => authRequest('/setup-status'),
+  setup: ({ username, password }) =>
+    authRequest('/setup', { method: 'POST', body: JSON.stringify({ username, password }) }),
 
   // -- Call views (merged from demo SPA, tech_design §3) -------------------
   // Runtime config snapshot (engine / language / scenario defaults) shown by

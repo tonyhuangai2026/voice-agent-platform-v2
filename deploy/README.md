@@ -33,9 +33,53 @@ The script:
 3. Deploys the CloudFormation stack. First deploy takes ~5-8 min (EC2 boot + pip install).
 4. Prints the CloudFront URL.
 
-## After deploy
+> **Note on the `Admin UI password` prompt.** `deploy.sh` may still prompt for
+> an "Admin UI password" (and pass it to CFN as `AdminPassword`), but **that
+> value is no longer used to seed an admin account.** The admin account is now
+> created interactively through the **first-run setup wizard** (see below) the
+> first time you open the site. You can leave the prompt blank. (The old
+> `ADMIN_PASSWORD` seed was removed because a CFN heredoc escaping bug corrupted
+> passwords containing `$`, backticks, or spaces before they were hashed, so the
+> seeded admin could never log in.)
 
-Open the `URL` output in a browser. CloudFront needs 3-5 min to propagate after the stack finishes.
+## After deploy — first-run admin setup
+
+Open the `URL` output in a browser. CloudFront needs 3-5 min to propagate after
+the stack finishes.
+
+On a **fresh deploy** the site has no admin account yet, so you are
+automatically redirected to **`/setup`**, the first-run setup wizard:
+
+1. Open the CloudFront `URL`.
+2. You are sent to **`/setup`**.
+3. Choose an **admin username** and **password** (and confirm the password).
+4. Submit — the account is created and you are **logged in automatically** and
+   dropped on the admin home page.
+
+After that the wizard is **permanently closed**: `/setup` redirects away,
+`GET /api/auth/setup-status` returns `{"needs_setup": false}`, and
+`POST /api/auth/setup` returns `409`. It can never reset or overwrite an
+existing account. Subsequent logins go through the normal `/login` page.
+
+### 首次设置管理员（中文）
+
+首次部署后，站点还没有管理员账号，打开站点会**自动跳转到 `/setup`** 设置向导：
+
+1. 打开 CloudFront 输出的 `URL`。
+2. 页面自动跳转到 **`/setup`**。
+3. 设置**管理员用户名**和**密码**（并再次输入确认密码）。
+4. 提交后即创建管理员账号并**自动登录**，进入后台首页。
+
+完成后向导**永久关闭**：再访问 `/setup` 会跳回，`setup-status` 恒为
+`{"needs_setup": false}`，再次 `POST /api/auth/setup` 返回 `409`，绝不会重置或
+覆盖已有账号。之后正常走 `/login` 登录。
+
+> 部署脚本里那条 **“Admin UI password”** 提示已不再用于创建管理员（旧的
+> `ADMIN_PASSWORD` 自动建号机制已废弃），可直接留空——管理员一律通过上面的
+> 首次设置向导创建。
+
+详见 [`../docs/first-run-setup.md`](../docs/first-run-setup.md)（含锁死后的恢复
+方法 / lockout recovery）。
 
 ## Inbound phone setup (Chime SDK Voice Connector — manual)
 

@@ -40,6 +40,7 @@ import time
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -219,11 +220,21 @@ class UserStore:
         }
         table = self._get_table()
         # Conditional put guards against a race where two creates land at once.
-        await asyncio.to_thread(
-            lambda: table.put_item(
-                Item=item, ConditionExpression="attribute_not_exists(username)"
+        # On a concurrent collision DynamoDB raises ClientError
+        # (ConditionalCheckFailedException), NOT the ValueError that the
+        # _get_raw pre-check above raises. Normalize it to the SAME
+        # ValueError("already exists") so every caller sees uniform semantics
+        # whether the dup was caught by the pre-check or lost the write race.
+        try:
+            await asyncio.to_thread(
+                lambda: table.put_item(
+                    Item=item, ConditionExpression="attribute_not_exists(username)"
+                )
             )
-        )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                raise ValueError(f"user {username!r} already exists") from e
+            raise
         return _safe_view(item)
 
     async def set_password(self, username: str, password: str) -> bool:
