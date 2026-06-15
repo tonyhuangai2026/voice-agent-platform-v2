@@ -2475,7 +2475,14 @@ async def auth_setup_status() -> dict:
     first-run setup. Returns ONLY the bool — never any username/count — so it
     leaks nothing about existing accounts. On an initialized deploy this is
     permanently false."""
-    return {"needs_setup": await _needs_setup()}
+    try:
+        return {"needs_setup": await _needs_setup()}
+    except Exception as e:
+        # USER_STORE.list() now re-raises real errors (AccessDenied, throttling)
+        # instead of masquerading as an empty table. Surface a clean 503 so the
+        # frontend guard fails open to the login flow rather than the wizard.
+        logger.error(f"setup-status: user store unavailable: {e}")
+        raise HTTPException(status_code=503, detail="user store unavailable")
 
 
 @app.post("/api/auth/setup")

@@ -124,6 +124,21 @@ Resources:
                 Resource:
                   - !GetAtt HistoryTable.Arn
                   - !Sub '${HistoryTable.Arn}/index/*'
+              # Users table (admin/JWT accounts). Needs full read+write incl.
+              # DeleteItem (admin user management). Without this the first-run
+              # /setup wizard's PutItem hits AccessDenied.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                Resource:
+                  - !GetAtt UsersTable.Arn
+                  - !Sub '${UsersTable.Arn}/index/*'
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -159,6 +174,18 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-users'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: username
+          KeyType: HASH
 
   # --- Network --------------------------------------------------------------
 
@@ -304,6 +331,10 @@ Resources:
             # Call history persistence (DynamoDB)
             HISTORY_TABLE=${HistoryTable}
             HISTORY_TTL_DAYS=30
+            # Users / admin accounts table. Must be set per-stack, else
+            # user_store defaults to the hardcoded 'genaiic-voicebot-users'
+            # and a non-prod stack would point at the prod table.
+            USERS_TABLE=${UsersTable}
 
             # LLM hangup / transfer-to-human tools (phone-leg only)
             PHONE_TOOLS_ENABLED=1

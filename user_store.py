@@ -186,8 +186,12 @@ class UserStore:
                     f"user_store: table {self._table_name!r} missing; list() -> []"
                 )
                 return []
-            logger.warning(f"user_store: scan failed: {e}")
-            return []
+            # Any OTHER error (e.g. AccessDenied, throttling) must NOT be
+            # swallowed as "empty": that would make _needs_setup() wrongly
+            # report needs_setup=true and send an initialized deployment to the
+            # /setup wizard. Re-raise so the caller surfaces a real error.
+            logger.error(f"user_store: scan failed (re-raising): {e}")
+            raise
         users = [_safe_view(it) for it in items]
         users.sort(key=lambda u: (u.get("username") or ""))
         return users

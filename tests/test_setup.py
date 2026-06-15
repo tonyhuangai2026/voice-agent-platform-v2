@@ -287,6 +287,51 @@ def test_create_reraises_other_client_errors(setup_env, monkeypatch):
         asyncio.run(run())
 
 
+def test_list_reraises_access_denied_not_empty(setup_env, monkeypatch):
+    """user_store.list() must NOT swallow AccessDenied as an empty table — that
+    would make _needs_setup() wrongly report needs_setup=true on an
+    initialized-but-misconfigured deploy. Only a missing table degrades to []."""
+    us = _fresh_user_store()
+
+    async def run():
+        store = us.UserStore()
+        table = store._get_table()
+
+        def _denied(**kwargs):
+            raise ClientError(
+                {"Error": {"Code": "AccessDeniedException", "Message": "no policy"}},
+                "Scan",
+            )
+
+        monkeypatch.setattr(table, "scan", _denied)
+        with pytest.raises(ClientError):
+            await store.list()
+
+    with mock_aws():
+        _create_users_table()
+        asyncio.run(run())
+
+
+def test_setup_status_503_when_user_store_errors(setup_env, monkeypatch):
+    """When list() raises (e.g. AccessDenied), GET /api/auth/setup-status must
+    return 503 — never a wrong {needs_setup:true} that would send an
+    initialized deploy to the /setup wizard."""
+    with mock_aws():
+        _create_users_table()
+        bot = _import_bot()
+        anon = _anon_client(bot)
+
+        async def _boom():
+            raise ClientError(
+                {"Error": {"Code": "AccessDeniedException", "Message": "no policy"}},
+                "Scan",
+            )
+
+        bot.USER_STORE.list = _boom  # type: ignore[assignment]
+        r = anon.get("/api/auth/setup-status")
+        assert r.status_code == 503, r.text
+
+
 # ---------------------------------------------------------------------------
 # Dropped ADMIN_PASSWORD seed
 # ---------------------------------------------------------------------------
